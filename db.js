@@ -1,32 +1,14 @@
-// MySQL connection setup for ShopkeeperMarketplace backend
-const mysql = require('mysql2');
+// MongoDB connection setup for ShopkeeperMarketplace backend
+const mongoose = require('mongoose');
 
-// Use DATABASE_URL if provided by Railway, otherwise use individual env vars
-let pool;
-if (process.env.DATABASE_URL) {
-  console.log('Using DATABASE_URL connection');
-  pool = mysql.createPool(process.env.DATABASE_URL);
-} else {
-  console.log('Database Config:', {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER || 'root',
-    database: process.env.DB_NAME || 'shopkeeper_marketplace',
-    passwordSet: !!process.env.DB_PASSWORD
-  });
-  
-  pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || 'Aakash@123',
-    database: process.env.DB_NAME || 'shopkeeper_marketplace',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-  });
-}
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/shopkeeper_marketplace';
 
-console.log('Server starting...');
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('✅ Connected to MongoDB'))
+  .catch(err => console.error('❌ MongoDB connection error:', err));
 
-module.exports = pool.promise();
+mongoose.connection.on('error', err => {
+  console.error('MongoDB error:', err);
+});
+
+module.exports = mongoose;

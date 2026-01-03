@@ -1,53 +1,83 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../db');
+const Shopkeeper = require('../models/Shopkeeper');
+const Customer = require('../models/Customer');
 const { verifyToken } = require('../middleware/auth');
 const router = express.Router();
 
-const JWT_SECRET = 'your_jwt_secret'; // Change this in production
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
-// Register route (separate tables)
+// Register route
 router.post('/register', async (req, res) => {
-  const { userType, name, email, password, phone, address, gst_number, business_name, shopCode } = req.body;
+  const { userType, name, email, password, phone, address, gst_number, business_name } = req.body;
+  
   if (!userType || !name || !email || !password || !phone) {
     return res.status(400).json({ error: 'All required fields must be provided' });
   }
+
   try {
-    let table, uniqueField, uniqueValue, insertFields, insertValues, checkQuery, generatedShopCode;
     if (userType === 'shopkeeper') {
-      // Generate shop code if not provided
-      generatedShopCode = shopCode || `SHOP${Date.now().toString(36).toUpperCase()}`;
-      table = 'shopkeepers';
-      uniqueField = 'email';
-      uniqueValue = email;
-      checkQuery = 'SELECT id FROM shopkeepers WHERE email = ? OR gst_number = ? OR shop_code = ?';
-      insertFields = 'name, email, password, gst_number, shop_code, business_name, address, phone';
-      insertValues = [name, email, await bcrypt.hash(password, 10), gst_number, generatedShopCode, business_name, address, phone];
+      // Check if shopkeeper already exists
+      const existing = await Shopkeeper.findOne({ 
+        $or: [{ email }, { gst_number }] 
+      });
+      
+      if (existing) {
+        return res.status(409).json({ error: 'Shopkeeper with this email or GST number already exists' });
+      }
+
+      // Generate shop code
+      const shop_code = `SHOP${Date.now().toString(36).toUpperCase()}`;
+      
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+      
+      // Create shopkeeper
+      const shopkeeper = new Shopkeeper({
+        name,
+        email,
+        password: hashedPassword,
+        gst_number,
+        shop_code,
+        business_name,
+        address: address || '',
+        phone
+      });
+      
+      await shopkeeper.save();
+      
+      res.json({ 
+        message: 'Shopkeeper registered successfully', 
+        shopCode: shop_code 
+      });
+      
     } else if (userType === 'customer') {
-      // Customer registration without shop code - shop code only needed at login
-      table = 'customers';
-      uniqueField = 'email';
-      uniqueValue = email;
-      checkQuery = 'SELECT id FROM customers WHERE email = ?';
-      insertFields = 'name, email, password, phone, address';
-      insertValues = [name, email, await bcrypt.hash(password, 10), phone, address];
+      // Check if customer already exists
+      const existing = await Customer.findOne({ email });
+      
+      if (existing) {
+        return res.status(409).json({ error: 'Customer with this email already exists' });
+      }
+      
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+      
+      // Create customer
+      const customer = new Customer({
+        name,
+        email,
+        password: hashedPassword,
+        phone,
+        address: address || ''
+      });
+      
+      await customer.save();
+      
+      res.json({ message: 'Customer registered successfully' });
+      
     } else {
       return res.status(400).json({ error: 'Invalid user type' });
-    }
-    // Check if user exists
-    const [rows] = await db.query(checkQuery, userType === 'shopkeeper' ? [email, gst_number, generatedShopCode] : [email]);
-    if (rows.length > 0) {
-      return res.status(409).json({ error: 'User already exists' });
-    }
-    // Insert user
-    await db.query(`INSERT INTO ${table} (${insertFields}) VALUES (${insertFields.split(',').map(() => '?').join(',')})`, insertValues);
-    
-    // Return shop code for shopkeepers
-    if (userType === 'shopkeeper') {
-      res.json({ message: 'User registered successfully', shopCode: insertValues[4] });
-    } else {
-      res.json({ message: 'User registered successfully' });
     }
   } catch (err) {
     console.error('Registration error:', err);
@@ -55,9 +85,10 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login route (separate tables)
+// Login route
 router.post('/login', async (req, res) => {
   const { email, password, userType, shopCode } = req.body;
+  
   if (!email || !password || !userType) {
     return res.status(400).json({ error: 'All fields are required' });
   }
@@ -67,52 +98,64 @@ router.post('/login', async (req, res) => {
   }
   
   try {
-    let table, selectFields;
+    let user;
+    
     if (userType === 'shopkeeper') {
-      table = 'shopkeepers';
-      selectFields = 'id, name, email, password, gst_number, shop_code, business_name, address, phone';
+      user = await Shopkeeper.findOne({ email });
+      
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      
     } else if (userType === 'customer') {
-      // First verify shop code
-      const [shopRows] = await db.query('SELECT id, business_name FROM shopkeepers WHERE shop_code = ?', [shopCode]);
-      if (shopRows.length === 0) {
+      // Verify shop code first
+      const shopkeeper = await Shopkeeper.findOne({ shop_code: shopCode });
+      
+      if (!shopkeeper) {
         return res.status(404).json({ error: 'Invalid shop code' });
       }
-      const shopkeeper_id = shopRows[0].id;
-      table = 'customers';
-      selectFields = 'id, name, email, password, shopkeeper_id, phone, address';
+      
+      user = await Customer.findOne({ email });
+      
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      
+      // Link customer to shopkeeper
+      if (!user.shopkeeper_id || user.shopkeeper_id.toString() !== shopkeeper._id.toString()) {
+        user.shopkeeper_id = shopkeeper._id;
+        await user.save();
+      }
+      
     } else {
       return res.status(400).json({ error: 'Invalid user type' });
     }
-    const [rows] = await db.query(`SELECT ${selectFields} FROM ${table} WHERE email = ?`, [email]);
-    if (rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    const user = rows[0];
     
-    // For customers, verify shop code and link them to the shopkeeper
-    if (userType === 'customer') {
-      const [shopRows] = await db.query('SELECT id FROM shopkeepers WHERE shop_code = ?', [shopCode]);
-      if (shopRows.length === 0) {
-        return res.status(404).json({ error: 'Invalid shop code' });
-      }
-      const shopkeeper_id = shopRows[0].id;
-      
-      // Update customer's shopkeeper_id if not already set or if different
-      if (!user.shopkeeper_id || user.shopkeeper_id !== shopkeeper_id) {
-        await db.query('UPDATE customers SET shopkeeper_id = ? WHERE id = ?', [shopkeeper_id, user.id]);
-        user.shopkeeper_id = shopkeeper_id;
-      }
-    }
-    
+    // Verify password
     const isMatch = await bcrypt.compare(password, user.password);
+    
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+    
     // Generate JWT
-    const token = jwt.sign({ id: user.id, email: user.email, userType, shopkeeper_id: user.shopkeeper_id || user.id }, JWT_SECRET, { expiresIn: '7d' });
-    // Remove password from user object
-    delete user.password;
-    res.json({ token, user: { ...user, userType } });
+    const token = jwt.sign(
+      { 
+        id: user._id, 
+        email: user.email, 
+        userType,
+        shopkeeper_id: user.shopkeeper_id || user._id
+      }, 
+      JWT_SECRET, 
+      { expiresIn: '7d' }
+    );
+    
+    // Remove password from response
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    
+    res.json({ token, user: { ...userResponse, userType } });
+    
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -124,24 +167,21 @@ router.get('/profile', verifyToken, async (req, res) => {
   try {
     const { id, userType } = req.user;
     
-    let table, selectFields;
+    let user;
+    
     if (userType === 'shopkeeper') {
-      table = 'shopkeepers';
-      selectFields = 'id, name, email, gst_number, business_name, address, phone, created_at';
+      user = await Shopkeeper.findById(id).select('-password');
     } else if (userType === 'customer') {
-      table = 'customers';
-      selectFields = 'id, name, email, phone, address, created_at';
+      user = await Customer.findById(id).select('-password');
     } else {
       return res.status(400).json({ error: 'Invalid user type' });
     }
     
-    const [rows] = await db.query(`SELECT ${selectFields} FROM ${table} WHERE id = ?`, [id]);
-    
-    if (rows.length === 0) {
+    if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    res.json({ user: { ...rows[0], userType } });
+    res.json({ user: { ...user.toObject(), userType } });
   } catch (err) {
     console.error('Profile fetch error:', err);
     res.status(500).json({ error: 'Server error' });
