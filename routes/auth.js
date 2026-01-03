@@ -25,20 +25,13 @@ router.post('/register', async (req, res) => {
       insertFields = 'name, email, password, gst_number, shop_code, business_name, address, phone';
       insertValues = [name, email, await bcrypt.hash(password, 10), gst_number, generatedShopCode, business_name, address, phone];
     } else if (userType === 'customer') {
-      if (!shopCode) {
-        return res.status(400).json({ error: 'Shop code is required for customer registration' });
-      }
-      // Verify shop code exists
-      const [shopRows] = await db.query('SELECT id FROM shopkeepers WHERE shop_code = ?', [shopCode]);
-      if (shopRows.length === 0) {
-        return res.status(404).json({ error: 'Invalid shop code' });
-      }
+      // Customer registration without shop code - shop code only needed at login
       table = 'customers';
       uniqueField = 'email';
       uniqueValue = email;
       checkQuery = 'SELECT id FROM customers WHERE email = ?';
-      insertFields = 'name, email, password, shopkeeper_id, phone, address';
-      insertValues = [name, email, await bcrypt.hash(password, 10), shopRows[0].id, phone, address];
+      insertFields = 'name, email, password, phone, address';
+      insertValues = [name, email, await bcrypt.hash(password, 10), phone, address];
     } else {
       return res.status(400).json({ error: 'Invalid user type' });
     }
@@ -96,11 +89,18 @@ router.post('/login', async (req, res) => {
     }
     const user = rows[0];
     
-    // For customers, verify they belong to the shop
+    // For customers, verify shop code and link them to the shopkeeper
     if (userType === 'customer') {
       const [shopRows] = await db.query('SELECT id FROM shopkeepers WHERE shop_code = ?', [shopCode]);
-      if (user.shopkeeper_id !== shopRows[0].id) {
-        return res.status(403).json({ error: 'You are not registered with this shop' });
+      if (shopRows.length === 0) {
+        return res.status(404).json({ error: 'Invalid shop code' });
+      }
+      const shopkeeper_id = shopRows[0].id;
+      
+      // Update customer's shopkeeper_id if not already set or if different
+      if (!user.shopkeeper_id || user.shopkeeper_id !== shopkeeper_id) {
+        await db.query('UPDATE customers SET shopkeeper_id = ? WHERE id = ?', [shopkeeper_id, user.id]);
+        user.shopkeeper_id = shopkeeper_id;
       }
     }
     
