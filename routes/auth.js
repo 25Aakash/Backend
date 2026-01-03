@@ -118,8 +118,6 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
-  }
-});
 
 // Get profile
 router.get('/profile', verifyToken, async (req, res) => {
