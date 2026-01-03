@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS shopkeepers (
     email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     gst_number VARCHAR(20) NOT NULL UNIQUE,
+    shop_code VARCHAR(20) NOT NULL UNIQUE,
     business_name VARCHAR(255),
     address VARCHAR(255),
     phone VARCHAR(20),
@@ -17,9 +18,11 @@ CREATE TABLE IF NOT EXISTS customers (
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
+    shopkeeper_id INT DEFAULT NULL,
     phone VARCHAR(20),
     address VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (shopkeeper_id) REFERENCES shopkeepers(id) ON DELETE SET NULL
 );
 
 -- Table for categories
