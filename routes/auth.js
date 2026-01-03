@@ -14,10 +14,10 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'All required fields must be provided' });
   }
   try {
-    let table, uniqueField, uniqueValue, insertFields, insertValues, checkQuery;
+    let table, uniqueField, uniqueValue, insertFields, insertValues, checkQuery, generatedShopCode;
     if (userType === 'shopkeeper') {
       // Generate shop code if not provided
-      const generatedShopCode = shopCode || `SHOP${Date.now().toString(36).toUpperCase()}`;
+      generatedShopCode = shopCode || `SHOP${Date.now().toString(36).toUpperCase()}`;
       table = 'shopkeepers';
       uniqueField = 'email';
       uniqueValue = email;
@@ -43,7 +43,7 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Invalid user type' });
     }
     // Check if user exists
-    const [rows] = await db.query(checkQuery, userType === 'shopkeeper' ? [email, gst_number, generatedShopCode || ''] : [email]);
+    const [rows] = await db.query(checkQuery, userType === 'shopkeeper' ? [email, gst_number, generatedShopCode] : [email]);
     if (rows.length > 0) {
       return res.status(409).json({ error: 'User already exists' });
     }
